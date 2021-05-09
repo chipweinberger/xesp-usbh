@@ -1,4 +1,4 @@
-## ESP32 S2 libusb inspired library
+## ESP32 S2 libusb inspired library for USB Host
 
 See main.c for example usage.
 
