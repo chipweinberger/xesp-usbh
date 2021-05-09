@@ -100,8 +100,25 @@ static void pipe_event_task(void* unused)
         usb_irp_t *irp = hcd_irp_dequeue(msg.pipe);
 
         if(irp == NULL){
-            ESP_LOGI(TAG, "pipe event task: irp null");
+            ESP_LOGE(TAG, "pipe event task: irp null");
             continue;
+        }
+
+        switch (msg.pipe_event)
+        {
+            case HCD_PIPE_EVENT_IRP_DONE:
+                break;
+            case HCD_PIPE_EVENT_ERROR_IRP_NOT_AVAIL:
+            case HCD_PIPE_EVENT_ERROR_OVERFLOW:
+                ESP_LOGE(TAG, "%s pipe: %p", hcd_pipe_event_str(msg.pipe_event), msg.pipe);
+                break;
+            case HCD_PIPE_EVENT_NONE:
+            case HCD_PIPE_EVENT_ERROR_XFER:
+            case HCD_PIPE_EVENT_INVALID:
+            case HCD_PIPE_EVENT_ERROR_STALL:
+                ESP_LOGE(TAG, "Ressetting pipe. %s pipe: %p", hcd_pipe_event_str(msg.pipe_event), msg.pipe);
+                hcd_pipe_command(msg.pipe, HCD_PIPE_CMD_RESET);
+                break;
         }
 
         uint16_t irp_idx = irp - &irps[0];

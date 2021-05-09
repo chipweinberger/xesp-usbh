@@ -58,10 +58,10 @@ const char* hcd_pipe_event_str(hcd_pipe_event_t event){
     case HCD_PIPE_EVENT_NONE: return "None";
     case HCD_PIPE_EVENT_IRP_DONE: return "IRP done";
     case HCD_PIPE_EVENT_INVALID: return "Invalid";
-    case HCD_PIPE_EVENT_ERROR_XFER: return "Error - xfer";
-    case HCD_PIPE_EVENT_ERROR_IRP_NOT_AVAIL: return "Error - IRP not Available";
-    case HCD_PIPE_EVENT_ERROR_OVERFLOW: return "Error - Overflow";
-    case HCD_PIPE_EVENT_ERROR_STALL: return "Error - Stall";
+    case HCD_PIPE_EVENT_ERROR_XFER: return "Xfer Error";
+    case HCD_PIPE_EVENT_ERROR_IRP_NOT_AVAIL: return "IRP Not Available Error";
+    case HCD_PIPE_EVENT_ERROR_OVERFLOW: return "Overflow Error";
+    case HCD_PIPE_EVENT_ERROR_STALL: return "Stall Error";
     }
     return "Unknown";
 }

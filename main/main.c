@@ -58,6 +58,11 @@ void app_main(void)
     //
     // midi
     //
+    // set the midi configuration
+    rc = xesp_usbh_set_config(device, 1);
+    if(rc != XUSB_OK) {
+        ESP_LOGE(TAG, "could not set config");
+    }
 
     // record information on input endpoints
     xesp_usb_config_descriptor_t* midi_config = NULL;
@@ -126,6 +131,8 @@ void app_main(void)
         while (true){
             vTaskDelay(500);
         }
+    } else {
+        printf("found midi configurration %i\n", midi_config->val.bConfigurationValue);
     }
 
     // set the midi configuration
@@ -147,6 +154,8 @@ void app_main(void)
 
     uint8_t* data_buff = calloc(1, XESP_USB_MAX_XFER_BYTES);
 
+    int fail_count = 0;
+
     while (true){
         vTaskDelay(50);
 
@@ -162,8 +171,11 @@ void app_main(void)
         rc = xesp_usbh_xfer_from_pipe(midi_pipe_in, data_buff);
         if (rc != XUSB_OK) {
             ESP_LOGE(TAG, "xfer midi IN pipe fail: %s", hcd_pipe_event_str(rc));
-            while (true){
-                vTaskDelay(500);
+            fail_count++;
+            if (fail_count > 2){
+                while(true){
+                    vTaskDelay(500);
+                }
             }
         }
     }
