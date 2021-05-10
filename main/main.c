@@ -154,29 +154,18 @@ void app_main(void)
 
     uint8_t* data_buff = calloc(1, XESP_USB_MAX_XFER_BYTES);
 
-    int fail_count = 0;
+    //ESP_LOGI(TAG, "out pipe: %p", midi_pipe_out);
+    ESP_LOGI(TAG, "in pipe: %p", midi_pipe_in);
 
     while (true){
-        vTaskDelay(50);
 
-        //ESP_LOGI(TAG, "out pipe: %p", midi_pipe_out);
-        ESP_LOGI(TAG, "in pipe: %p", midi_pipe_in);
-
-/*
-        rc = xesp_usbh_xfer_from_pipe(midi_pipe_out, data_buff);
-        if (rc != XUSB_OK) {
-            ESP_LOGE(TAG, "xfer midi OUT pipe fail: %s", hcd_pipe_event_str(rc));
-        }
-*/
-        rc = xesp_usbh_xfer_from_pipe(midi_pipe_in, data_buff);
+        // xfer in data
+        uint16_t num_bytes_transfered;
+        rc = xesp_usbh_xfer_from_pipe(midi_pipe_in, data_buff, &num_bytes_transfered);
         if (rc != XUSB_OK) {
             ESP_LOGE(TAG, "xfer midi IN pipe fail: %s", hcd_pipe_event_str(rc));
-            fail_count++;
-            if (fail_count > 2){
-                while(true){
-                    vTaskDelay(500);
-                }
-            }
+        } else {
+            ESP_LOG_BUFFER_HEX_LEVEL(TAG, data_buff, num_bytes_transfered, ESP_LOG_INFO);
         }
     }
 }

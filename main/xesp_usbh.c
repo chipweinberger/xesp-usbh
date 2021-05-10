@@ -35,7 +35,7 @@ static const char* TAG = "xesp usb";
 struct xesp_open_pipe_t{
     hcd_port_handle_t port;
     hcd_pipe_handle_t pipe;
-    int16_t addr; // usb device address
+    int16_t device_addr; // usb device address
     uint64_t nth_open; // the nth pipe opened
     bool is_control_pipe; // is the main control endpoint (EP0) ?
     uint16_t bMaxPacketSize0; // obtained from the device description
@@ -275,7 +275,7 @@ bool xesp_usbh_close_device(xesp_usb_device_t device) {
             open_pipes[i].port = NULL;
             open_pipes[i].pipe = NULL;
             open_pipes[i].nth_open = 0;
-            open_pipes[i].addr = -1;
+            open_pipes[i].device_addr = 0;
             open_pipes[i].is_control_pipe = false;
             open_pipes[i].bMaxPacketSize0 = 0;
         }
@@ -305,8 +305,23 @@ hcd_pipe_handle_t xesp_usbh_open_endpoint(xesp_usb_device_t device, usb_desc_ep_
         ESP_LOGI(TAG, "opening control pipe");
     }
 
+    // determine the device address
+    xesp_open_pipe_t* ctrl_info = new_xesp_usbh_get_pipe_info(device.ctrl_pipe);
+    if (!ctrl_info) {
+        ESP_LOGE(TAG, "could not find pipe info for pipe %p", device.ctrl_pipe);
+        return NULL;
+    }
+
+    uint8_t device_addr = ctrl_info->device_addr;
+    if (device_addr == (uint8_t) -1){
+        ESP_LOGE(TAG, "cant open pipe invalid device_addr -1");
+        return NULL;
+    } else {
+        printf("device_addr %u\n", device_addr);
+    }
+
     // open the pipe / endpoint
-    hcd_pipe_handle_t pipe = xesp_usbh_xfer_open_endpoint(device.port, ep);
+    hcd_pipe_handle_t pipe = xesp_usbh_xfer_open_endpoint(device.port, device_addr, ep);
 
     if (!pipe) {
         ESP_LOGE(TAG, "failed to open control pipe");
@@ -351,7 +366,7 @@ hcd_pipe_handle_t xesp_usbh_open_endpoint(xesp_usb_device_t device, usb_desc_ep_
     free->pipe = pipe;
     free->nth_open = num_ctlr_pipes_opened;
     free->is_control_pipe = is_control_pipe;
-    free->addr = -1;
+    free->device_addr = device_addr;
 
     if (control_pipe) {
         free->bMaxPacketSize0 = control_pipe->bMaxPacketSize0;
@@ -385,18 +400,17 @@ bool xesp_usbh_close_endpoint(hcd_pipe_handle_t pipe){
         return false;
     }
 
-    // keep track of this pipe
     bool found = false;
     bool is_control_pipe = false;
     for (int i = 0; i < XESP_USBH_MAX_PIPES; i++){
-        // find a free slot
+        // clear this pipe
         if (open_pipes[i].pipe == pipe) {
             is_control_pipe = open_pipes[i].is_control_pipe;
             open_pipes[i].port = NULL;
             open_pipes[i].pipe = NULL;
             open_pipes[i].nth_open = 0;
             open_pipes[i].is_control_pipe = false;
-            open_pipes[i].addr = -1;
+            open_pipes[i].device_addr = 0;
             open_pipes[i].bMaxPacketSize0 = 0;
             found = true;
         }
@@ -414,24 +428,17 @@ bool xesp_usbh_close_endpoint(hcd_pipe_handle_t pipe){
     return true;
 }
 
-hcd_pipe_event_t xesp_usbh_xfer_to_pipe(hcd_pipe_handle_t pipe, uint8_t* data){
+hcd_pipe_event_t xesp_usbh_xfer_to_pipe(hcd_pipe_handle_t pipe, uint8_t* data, uint16_t length){
     return 0;
 }
 
-hcd_pipe_event_t xesp_usbh_xfer_from_pipe(hcd_pipe_handle_t pipe, uint8_t* data){
+hcd_pipe_event_t xesp_usbh_xfer_from_pipe(hcd_pipe_handle_t pipe, 
+                                          uint8_t* data, 
+                                          uint16_t* num_bytes_transfered){
     // blocks until an irp is available
     usb_irp_t* irp = xesp_usbh_xfer_take_irp();
 
     ESP_LOGI(TAG, "xfer from pipe: %p", pipe);
-
-/*
-    usb_ctrl_req_t* req =  (usb_ctrl_req_t *) irp->data_buffer;
-    req->bRequestType = USB_B_REQUEST_TYPE_DIR_IN | USB_B_REQUEST_TYPE_TYPE_STANDARD | USB_B_REQUEST_TYPE_RECIP_ENDPOINT;  
-    req->bRequest = USB_B_REQUEST_GET_STATUS; 
-    req->wValue = 0;  
-    req->wIndex = 1;  
-    req->wLength = 2;  
-*/
 
     irp->num_bytes = 64;
 
@@ -441,8 +448,12 @@ hcd_pipe_event_t xesp_usbh_xfer_from_pipe(hcd_pipe_handle_t pipe, uint8_t* data)
     if (rc == XUSB_OK){
         ESP_LOGI(TAG, "actual bytes transfered: %u", irp->actual_num_bytes);
 
-        uint8_t * data_returned = irp->data_buffer + sizeof(usb_ctrl_req_t);
+        *num_bytes_transfered = irp->actual_num_bytes;
+
+        uint8_t * data_returned = irp->data_buffer;// + sizeof(usb_ctrl_req_t);
         memcpy(data, data_returned, irp->actual_num_bytes); 
+    } else {
+        *num_bytes_transfered = 0;
     }
 
     // mark irp as available
@@ -583,7 +594,7 @@ hcd_pipe_event_t xesp_usb_set_addr_auto(xesp_usb_device_t device){
 
     // loop through all devices and determine available addresses
     for(int i = 0; i < XESP_USBH_MAX_PIPES; i++){
-        int16_t addr = open_pipes[i].addr;
+        int16_t addr = open_pipes[i].device_addr;
         if (addr != -1 && open_pipes[i].port != NULL) {
             taken_addrs[addr] = true;
         }
@@ -594,7 +605,7 @@ hcd_pipe_event_t xesp_usb_set_addr_auto(xesp_usb_device_t device){
     }
 
     // we already have a USB address
-    if (found->addr != -1) {
+    if (found->device_addr != 0) {
         xSemaphoreGive(open_pipes_mutex);
         return XUSB_OK;
     }
@@ -605,7 +616,7 @@ hcd_pipe_event_t xesp_usb_set_addr_auto(xesp_usb_device_t device){
         if (taken_addrs[i] == false) {
             // note: we do this assignment within the open_pipes mutex
             // so that only one thread later does the assignment
-            found->addr = i;
+            found->device_addr = i;
             new_addr = i;
             break;
         }
@@ -621,7 +632,7 @@ hcd_pipe_event_t xesp_usb_set_addr_auto(xesp_usb_device_t device){
     hcd_pipe_event_t rc = xesp_usbh_set_addr(device, new_addr);
     if (rc != XUSB_OK) {
         ESP_LOGE(TAG, "usb set addr failed"); 
-        found->addr = -1;
+        found->device_addr = 0;
     }
 
     xSemaphoreGive(open_pipes_mutex);
@@ -652,6 +663,7 @@ hcd_pipe_event_t xesp_usbh_set_addr(xesp_usb_device_t device, uint8_t addr){
     if(ESP_OK != hcd_pipe_update(device.ctrl_pipe, addr, info->bMaxPacketSize0)) {
         ESP_LOGE(TAG, "failed to update ctrl pipe addr");
     } else {
+        info->device_addr = addr; // update the address
         ESP_LOGI(TAG, "hcd_pipe_update pipe %p addr %u bMaxPacketSize0 %u", 
             device.ctrl_pipe, addr, info->bMaxPacketSize0);
     }

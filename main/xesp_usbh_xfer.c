@@ -95,7 +95,7 @@ static void pipe_event_task(void* unused)
 
         xQueueReceive(pipe_evt_queue, &msg, portMAX_DELAY);
 
-        ESP_LOGI(TAG, "pipe: %p event: %s", msg.pipe, hcd_pipe_event_str(msg.pipe_event));
+        //ESP_LOGI(TAG, "pipe: %p event: %s", msg.pipe, hcd_pipe_event_str(msg.pipe_event));
 
         usb_irp_t *irp = hcd_irp_dequeue(msg.pipe);
 
@@ -124,7 +124,7 @@ static void pipe_event_task(void* unused)
         uint16_t irp_idx = irp - &irps[0];
         xEventGroupSetBits(irp_xfer_done_xEvents[irp_idx], (uint32_t) msg.pipe_event);
 
-        ESP_LOGI(TAG, "irp: %u set bits", irp_idx);
+        //ESP_LOGI(TAG, "irp: %u set bits", irp_idx);
     }
 }
 
@@ -230,7 +230,7 @@ bool xesp_usbh_allocate_irps(){
 // Endpoints
 //
 
-hcd_pipe_handle_t xesp_usbh_xfer_open_endpoint(hcd_port_handle_t port, usb_desc_ep_t* ep)
+hcd_pipe_handle_t xesp_usbh_xfer_open_endpoint(hcd_port_handle_t port, uint8_t device_addr, usb_desc_ep_t* ep)
 {
     ESP_LOGI(TAG, "open endpoint");
 
@@ -255,7 +255,7 @@ hcd_pipe_handle_t xesp_usbh_xfer_open_endpoint(hcd_port_handle_t port, usb_desc_
         .callback_arg = (void *)port,
         .context = NULL,
         .ep_desc = use_ep0 ? NULL : ep, // null signals ep0 (control)
-        .dev_addr = 0,
+        .dev_addr = device_addr,
         .dev_speed = port_speed,
     };
 
@@ -372,8 +372,6 @@ hcd_pipe_event_t xesp_usbh_xfer_irp(hcd_pipe_handle_t pipe, usb_irp_t* irp){
     // debug
     //ESP_LOGI(TAG,"enqueued xfer irp %u. waiting.", idx);
     //usb_util_print_irp(&irps[idx]);
-    hcd_pipe_state_t pipe_state0 = hcd_pipe_get_state(pipe);
-    ESP_LOGI(TAG, "(before enqueue) pipe state: %s", hcd_pipe_state_str(pipe_state0));
 
     //Enqueue the transfer request
     esp_err_t err;
@@ -395,12 +393,16 @@ hcd_pipe_event_t xesp_usbh_xfer_irp(hcd_pipe_handle_t pipe, usb_irp_t* irp){
                 0x00FFFFFF,           /* The bits within the event group to wait for. */
                 pdTRUE,        /* clear the bits after 'wait' completes */
                 pdFALSE,       /* Wait for all bits? */
-                5000 / portTICK_PERIOD_MS);
+                portMAX_DELAY); 
 
-        if (!uxBits) {
+        // ^ portMAX_DELAY is requred for now. 
+        // For some reason if we allow timeouts, then the next time we 
+        // get an event we crash on hcd_irp_dequeue
+        if (!uxBits) { // timeout
+            usb_irp_t *irp2 = hcd_irp_dequeue(pipe);
             hcd_pipe_state_t pipe_state = hcd_pipe_get_state(pipe);
-            ESP_LOGE(TAG, "xfer timeout irp:%u pipe: %p pipe_state: %s", idx,
-                pipe, hcd_pipe_state_str(pipe_state));
+            ESP_LOGE(TAG, "xfer timeout irp:%u pipe: %p pipe_state: %s %s", idx,
+                pipe, hcd_pipe_state_str(pipe_state), irp2 ? "IRP Dequeued" : "No more IRPs");
             return HCD_PIPE_EVENT_ERROR_XFER;
         }
     }

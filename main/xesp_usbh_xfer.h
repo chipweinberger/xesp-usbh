@@ -32,7 +32,7 @@ void xesp_usbh_xfer_deinit();
 //
 
 // open an endpoint
-hcd_pipe_handle_t xesp_usbh_xfer_open_endpoint(hcd_port_handle_t port, usb_desc_ep_t* ep);
+hcd_pipe_handle_t xesp_usbh_xfer_open_endpoint(hcd_port_handle_t port, uint8_t device_addr, usb_desc_ep_t* ep);
 
 // close an endpoint
 bool xesp_usbh_xfer_close_endpoint(hcd_pipe_handle_t pipe);

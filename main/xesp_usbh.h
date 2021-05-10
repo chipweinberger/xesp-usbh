@@ -38,9 +38,9 @@ hcd_pipe_handle_t xesp_usbh_open_endpoint(xesp_usb_device_t device, usb_desc_ep_
 
 bool xesp_usbh_close_endpoint(hcd_pipe_handle_t pipe);
 
-hcd_pipe_event_t xesp_usbh_xfer_to_pipe(hcd_pipe_handle_t pipe, uint8_t* data);
+hcd_pipe_event_t xesp_usbh_xfer_to_pipe(hcd_pipe_handle_t pipe, uint8_t* data, uint16_t length);
 
-hcd_pipe_event_t xesp_usbh_xfer_from_pipe(hcd_pipe_handle_t pipe, uint8_t* data);
+hcd_pipe_event_t xesp_usbh_xfer_from_pipe(hcd_pipe_handle_t pipe, uint8_t* data, uint16_t* num_bytes_transfered);
 
 //////////////////////////////////
 // Descriptors 
