@@ -11,6 +11,63 @@
 
 static const char* TAG = "main";
 
+const char* midi_node_name(uint8_t byte){
+    switch (byte % 12){
+        case 0: return "C";
+        case 1: return "Db";
+        case 2: return "D";
+        case 3: return "Eb";
+        case 4: return "E";
+        case 5: return "F";
+        case 6: return "Gb";
+        case 7: return "G";
+        case 8: return "Ab";
+        case 9: return "A";
+        case 10: return "Bb";
+        case 11: return "B";
+        default: return "N/A";
+    }
+}
+
+uint8_t midi_note_octave(uint8_t byte){
+    return byte / 12;
+}
+
+void midi_event(uint8_t* event) {
+	if (event[0] == 0 &&
+		event[1] == 0 &&
+		event[2] == 0 &&
+		event[3] == 0){
+		//ignore
+		return;
+	}
+	uint8_t channel = (event[0] >> 4) & 15;
+    uint8_t cin = event[0] & 15; // code index number
+	switch(cin) {
+	case 8:
+		printf("ch %d note off %02x %02x %02x : %s%u\n", channel, 
+            event[1], event[2], event[3], midi_node_name(event[2]), midi_note_octave(event[2]));
+        break;
+	case 9:
+		printf("ch %d note on  %02x %02x %02x : %s%u velocity:%u\n", channel,
+            event[1], event[2], event[3], 
+            midi_node_name(event[2]), midi_note_octave(event[2]), event[3]);
+        break;
+	case 11:
+		printf("ch %d ctrl     %02x %02x %02x\n", channel, 
+            event[1], event[2], event[3]);
+        break;
+	case 14:
+		printf("ch %d pitch    %02x %02x %02x\n", channel,
+             event[1], event[2], event[3]);
+        break;
+	default:
+		printf("ch %d ?        %02x %02x %02x\n", channel, 
+            event[1], event[2], event[3]);
+        break;
+	}
+}
+
 void app_main(void)
 {
     printf("Hello world USB host!\n");
@@ -152,10 +209,10 @@ void app_main(void)
     // free the config
     //xesp_usbh_free_config_descriptor(midi_config);
 
-    uint8_t* data_buff = calloc(1, XESP_USB_MAX_XFER_BYTES);
-
     //ESP_LOGI(TAG, "out pipe: %p", midi_pipe_out);
     ESP_LOGI(TAG, "in pipe: %p", midi_pipe_in);
+
+    uint8_t* data_buff = calloc(1, XESP_USB_MAX_XFER_BYTES);
 
     while (true){
 
@@ -164,8 +221,15 @@ void app_main(void)
         rc = xesp_usbh_xfer_from_pipe(midi_pipe_in, data_buff, &num_bytes_transfered);
         if (rc != XUSB_OK) {
             ESP_LOGE(TAG, "xfer midi IN pipe fail: %s", hcd_pipe_event_str(rc));
-        } else {
-            ESP_LOG_BUFFER_HEX_LEVEL(TAG, data_buff, num_bytes_transfered, ESP_LOG_INFO);
-        }
-    }
+            continue;
+        } 
+        
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, data_buff, num_bytes_transfered, ESP_LOG_INFO);
+
+
+		for(int i = 0; i < num_bytes_transfered; i += 4) {
+			// each midi event is 4 bytes
+			midi_event(data_buff + i);
+		}
+	}
 }

@@ -440,7 +440,7 @@ hcd_pipe_event_t xesp_usbh_xfer_from_pipe(hcd_pipe_handle_t pipe,
 
     ESP_LOGI(TAG, "xfer from pipe: %p", pipe);
 
-    irp->num_bytes = 64;
+    irp->num_bytes = 64;// smaller numbers cause crashes at time of writing... odd.
 
     // blocks until the irp is completed.
     hcd_pipe_event_t rc = xesp_usbh_xfer_irp(pipe, irp);
