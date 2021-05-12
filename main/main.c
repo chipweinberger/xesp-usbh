@@ -74,8 +74,13 @@ void app_main(void)
 
     xesp_usbh_init();
 
-    // block until we open a device
     uint64_t open_count = 0;
+
+open_device:
+
+    printf("opening device...\n");
+
+    // block until we open a device
     xesp_usb_device_t device = xesp_usbh_open_device(&open_count);
 
     usb_desc_devc_t2 descriptor;
@@ -85,11 +90,6 @@ void app_main(void)
         usb_util_print_devc(&descriptor);
     } else {
         ESP_LOGE(TAG, "could not get device descriptor");
-    }
-
-    rc = xesp_usbh_set_addr(device, 1);
-    if(rc != XUSB_OK) {
-        ESP_LOGE(TAG, "could not set addr");
     }
 
     // get strings
@@ -221,7 +221,7 @@ void app_main(void)
         rc = xesp_usbh_xfer_from_pipe(midi_pipe_in, data_buff, &num_bytes_transfered);
         if (rc != XUSB_OK) {
             ESP_LOGE(TAG, "xfer midi IN pipe fail: %s", hcd_pipe_event_str(rc));
-            continue;
+            goto open_device;
         } 
         
         ESP_LOG_BUFFER_HEX_LEVEL(TAG, data_buff, num_bytes_transfered, ESP_LOG_INFO);

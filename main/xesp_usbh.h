@@ -72,10 +72,6 @@ hcd_pipe_event_t xesp_usbh_get_string_descriptor(xesp_usb_device_t device,
 //  Set
 //
 
-// In the USB spec, the host must assign each device an address after opening the control port
-hcd_pipe_event_t xesp_usbh_set_addr(xesp_usb_device_t device, 
-                                   uint8_t addr);
-
 // set the currently active configuration
 hcd_pipe_event_t xesp_usbh_set_config(xesp_usb_device_t device, 
                                       uint8_t config_idx);

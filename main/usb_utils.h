@@ -73,6 +73,12 @@ const char* usb_descriptor_type_str(uint8_t bDescriptorType);
 const char* usb_transfer_status_str(usb_transfer_status_t status);
 
 ///////////////////////////////////////////
+// USB Util
+//
+
+bool usb_util_is_control_ep(usb_desc_ep_t* obj);
+
+///////////////////////////////////////////
 // USB Descriptions
 //
 

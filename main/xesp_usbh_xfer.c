@@ -242,9 +242,9 @@ hcd_pipe_handle_t xesp_usbh_xfer_open_endpoint(hcd_port_handle_t port, uint8_t d
     }
 
     // control endpoint?
-    bool use_ep0 = ep == NULL || ep->bEndpointAddress == 0;
+    bool is_control = usb_util_is_control_ep(ep);
 
-    if (use_ep0) {
+    if (is_control) {
         ESP_LOGI(TAG, "CONTROL endpoint EP0");
     } else {
         usb_util_print_ep(ep);
@@ -254,7 +254,7 @@ hcd_pipe_handle_t xesp_usbh_xfer_open_endpoint(hcd_port_handle_t port, uint8_t d
         .callback = pipe_isr_callback,
         .callback_arg = (void *)port,
         .context = NULL,
-        .ep_desc = use_ep0 ? NULL : ep, // null signals ep0 (control)
+        .ep_desc = is_control ? NULL : ep, // null signals ep0 (control)
         .dev_addr = device_addr,
         .dev_speed = port_speed,
     };
@@ -284,16 +284,21 @@ bool xesp_usbh_xfer_close_endpoint(hcd_pipe_handle_t pipe){
     //Dequeue transfer requests
     do{
         usb_irp_t *irp = hcd_irp_dequeue(pipe);
-        if(irp == NULL) break;
-    }while(1);
 
-    xSemaphoreGive(irp_enqueue_xSemaphore);
+        if(irp == NULL) break;
+
+        uint16_t irp_idx = irp - &irps[0];
+        xEventGroupSetBits(irp_xfer_done_xEvents[irp_idx], HCD_PIPE_EVENT_ERROR_IRP_NOT_AVAIL); 
+    }while(1);
 
     //Delete the pipe
     if(ESP_OK != hcd_pipe_free(pipe)) {
         ESP_LOGE(TAG, "err to free pipes");
+        xSemaphoreGive(irp_enqueue_xSemaphore);
         return false;
     }
+
+    xSemaphoreGive(irp_enqueue_xSemaphore);
 
     return true;
 }

@@ -146,6 +146,16 @@ const char* usb_ep_transfer_type_str(uint8_t bmAttributes){
     }
 }
 
+///////////////////////////////////////////
+// USB Util
+//
+
+bool usb_util_is_control_ep(usb_desc_ep_t* ep){
+    if(ep == NULL) return true;
+    int ep_addr = USB_DESC_EP_GET_EP_NUM(ep);
+    return ep_addr == 0;
+}
+
 
 ///////////////////////////////////////////
 // USB Descriptions

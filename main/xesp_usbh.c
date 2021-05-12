@@ -55,6 +55,10 @@ static xesp_open_pipe_t open_pipes[XESP_USBH_MAX_PIPES];
 
 static SemaphoreHandle_t open_pipes_mutex;
 
+//forward declaration
+hcd_pipe_event_t xesp_usb_set_addr_auto(hcd_port_handle_t port);
+hcd_pipe_event_t xesp_usbh_set_addr(xesp_usb_device_t device, uint8_t addr);
+
 
 // port callback 
 static void port_event_callback(hcd_port_handle_t port, hcd_port_event_t event){
@@ -200,8 +204,10 @@ xesp_usb_device_t xesp_usbh_open_device(uint64_t* open_idx){
 
         loop_count++;
 
+        printf("open_idx %llu num_ctlr_pipes_opened %llu\n", *open_idx, num_ctlr_pipes_opened);
+
         // has caller already opened all devices?
-        if (*open_idx == num_ctlr_pipes_opened) {
+        if (*open_idx >= num_ctlr_pipes_opened) {
 
             // block until a device is connected
             ESP_LOGI(TAG, "Waiting for USB Connection...");
@@ -242,7 +248,7 @@ xesp_usb_device_t xesp_usbh_open_device(uint64_t* open_idx){
     device.ctrl_pipe = found.pipe;
 
     // return the open idx of this device
-    *open_idx = found.nth_open;
+    *open_idx = num_ctlr_pipes_opened;
 
     ESP_LOGI(TAG, "opened device #%llu port %p ctrl_pipe %p", *open_idx, device.port, device.ctrl_pipe);
 
@@ -299,22 +305,35 @@ xesp_open_pipe_t* new_xesp_usbh_get_pipe_info(hcd_pipe_handle_t pipe){
     return NULL;
 }
 
+xesp_open_pipe_t* new_xesp_usbh_get_ctrl_pipe_info(hcd_port_handle_t port){
+    for (int i = 0; i < XESP_USBH_MAX_PIPES; i++){
+        if (open_pipes[i].port == port &&
+            open_pipes[i].is_control_pipe == true){
+            return &open_pipes[i];
+        }
+    }
+    ESP_LOGE(TAG, "could not find ctrl pipe info for port %p", port);
+    return NULL;
+}
+
 hcd_pipe_handle_t xesp_usbh_open_endpoint(xesp_usb_device_t device, usb_desc_ep_t* ep){
 
-    if (ep == NULL){
+    bool is_ctrl_pipe = usb_util_is_control_ep(ep);
+
+    if (is_ctrl_pipe){
         ESP_LOGI(TAG, "opening control pipe");
     }
 
     // determine the device address
     xesp_open_pipe_t* ctrl_info = new_xesp_usbh_get_pipe_info(device.ctrl_pipe);
-    if (!ctrl_info) {
-        ESP_LOGE(TAG, "could not find pipe info for pipe %p", device.ctrl_pipe);
+    if (is_ctrl_pipe == false && ctrl_info == NULL) {
+        ESP_LOGE(TAG, "could not find control pipe info for pipe %p", device.ctrl_pipe);
         return NULL;
     }
 
     uint8_t device_addr = ctrl_info->device_addr;
-    if (device_addr == (uint8_t) -1){
-        ESP_LOGE(TAG, "cant open pipe invalid device_addr -1");
+    if (device_addr == 0 && !is_ctrl_pipe){
+        ESP_LOGE(TAG, "cant open pipe. device addess has not been set");
         return NULL;
     } else {
         printf("device_addr %u\n", device_addr);
@@ -332,18 +351,11 @@ hcd_pipe_handle_t xesp_usbh_open_endpoint(xesp_usb_device_t device, usb_desc_ep_
 
     // keep track of this pipe in the open_pipes gobal object
     xesp_open_pipe_t* free = NULL;
-    xesp_open_pipe_t* control_pipe = NULL;
     for (int i = 0; i < XESP_USBH_MAX_PIPES; i++){
         // find a free slot
         if (open_pipes[i].port == NULL) {
             free = &open_pipes[i];
         } 
-        // if we are not the control pipe, find it
-        if (ep != NULL && 
-            open_pipes[i].port == device.port &&
-            open_pipes[i].is_control_pipe) {
-            control_pipe = &open_pipes[i];
-        }
     }
 
     if (free == NULL){
@@ -352,10 +364,8 @@ hcd_pipe_handle_t xesp_usbh_open_endpoint(xesp_usb_device_t device, usb_desc_ep_
         return NULL;
     }
 
-    bool is_control_pipe = ep == NULL || ep->bEndpointAddress == 0;
-
     // open pipe counter
-    if(is_control_pipe) {
+    if(is_ctrl_pipe) {
         num_ctlr_pipes_opened++;
     }
 
@@ -365,11 +375,12 @@ hcd_pipe_handle_t xesp_usbh_open_endpoint(xesp_usb_device_t device, usb_desc_ep_
     free->port = device.port;
     free->pipe = pipe;
     free->nth_open = num_ctlr_pipes_opened;
-    free->is_control_pipe = is_control_pipe;
+    free->is_control_pipe = is_ctrl_pipe;
     free->device_addr = device_addr;
 
-    if (control_pipe) {
-        free->bMaxPacketSize0 = control_pipe->bMaxPacketSize0;
+    if (ctrl_info) {
+        // take the max packet size from the control ep
+        free->bMaxPacketSize0 = ctrl_info->bMaxPacketSize0;
     } else {
         // this gets filled in when the user first asks for the device descriptor
         free->bMaxPacketSize0 = 0; 
@@ -490,15 +501,25 @@ hcd_pipe_event_t xesp_usbh_get_device_descriptor(xesp_usb_device_t device, usb_d
     xesp_usbh_xfer_give_irp(irp);
 
     if (rc == XUSB_OK){
-        // set the max packet size
+
         xSemaphoreTake(open_pipes_mutex, portMAX_DELAY);
-        for(int i = 0; i < XESP_USBH_MAX_PIPES; i++){
-            if (open_pipes[i].port == device.port) {
-                ESP_LOGI(TAG, "port: %p bMaxPacketSize0: %u", device.port, desc->bMaxPacketSize0);
-                open_pipes[i].bMaxPacketSize0 = desc->bMaxPacketSize0;
+
+        xesp_open_pipe_t* ctrl_info = new_xesp_usbh_get_ctrl_pipe_info(device.port);
+
+        // set the max packet size
+        ctrl_info->bMaxPacketSize0 = desc->bMaxPacketSize0;
+
+        xSemaphoreGive(open_pipes_mutex);
+
+        // set the device address
+        if(ctrl_info->device_addr == 0){
+            // In the USB spec, the host must assign each device an 
+            // address after opening the control port
+            hcd_pipe_event_t rc = xesp_usb_set_addr_auto(device.port);
+            if(rc != XUSB_OK) {
+                ESP_LOGE(TAG, "could not set address");
             }
         }
-        xSemaphoreGive(open_pipes_mutex);
     }
 
     return rc;
@@ -585,54 +606,63 @@ hcd_pipe_event_t xesp_usbh_get_string_descriptor(xesp_usb_device_t device,
 //
 
 // set usb address of device, if needed
-hcd_pipe_event_t xesp_usb_set_addr_auto(xesp_usb_device_t device){
+hcd_pipe_event_t xesp_usb_set_addr_auto(hcd_port_handle_t port){
 
     xSemaphoreTake(open_pipes_mutex, portMAX_DELAY);
 
-    xesp_open_pipe_t* found = NULL;
-    bool taken_addrs[XESP_USBH_MAX_PIPES] = {0};
+    // our ctlr pipe info 
+    xesp_open_pipe_t* ctrl_info = new_xesp_usbh_get_ctrl_pipe_info(port);
+    if (ctrl_info == NULL){
+        ESP_LOGE(TAG, "set addr auto failed. no ctrl pipe found");
+        return HCD_PIPE_EVENT_INVALID;
+    }
+
+    // check if we already have a USB address
+    if (ctrl_info->device_addr != 0) {
+        xSemaphoreGive(open_pipes_mutex);
+        return XUSB_OK; // no work to do
+    }
 
     // loop through all devices and determine available addresses
+    bool taken_addrs[XESP_USBH_MAX_PIPES] = {0};
+    taken_addrs[0] = true; // cant use address 0
+
     for(int i = 0; i < XESP_USBH_MAX_PIPES; i++){
         int16_t addr = open_pipes[i].device_addr;
-        if (addr != -1 && open_pipes[i].port != NULL) {
+        if (open_pipes[i].port != NULL) {
             taken_addrs[addr] = true;
         }
-
-        if (device.port == open_pipes[i].port) {
-            found = &open_pipes[i];
-        }
     }
 
-    // we already have a USB address
-    if (found->device_addr != 0) {
-        xSemaphoreGive(open_pipes_mutex);
-        return XUSB_OK;
-    }
-
-    // determine an available USB address, if needed
-    int16_t new_addr = -1;
+    // determine an available USB address from the bitmask
+    int16_t new_addr = 0;
     for (int i = 0; i < XESP_USBH_MAX_PIPES; i++){
         if (taken_addrs[i] == false) {
-            // note: we do this assignment within the open_pipes mutex
-            // so that only one thread later does the assignment
-            found->device_addr = i;
             new_addr = i;
             break;
         }
     }
 
-    if (new_addr == -1) {
+    if (new_addr == 0) {
         // This should really never happen because there are 128 available device addresses. Thats a lot.
         // If we hit this, its probably a bug somewhere.
         ESP_LOGE(TAG, "could not set device addr. no available USB address"); 
         return HCD_PIPE_STATE_INVALID;
     }
 
+    // note: we do this assignment within the open_pipes mutex
+    // so that only one thread later does the assignment
+    ctrl_info->device_addr = new_addr;
+
+    xesp_usb_device_t device;
+    device.port = port;
+    device.ctrl_pipe = ctrl_info->pipe;
+
+    // set usb device address
     hcd_pipe_event_t rc = xesp_usbh_set_addr(device, new_addr);
     if (rc != XUSB_OK) {
         ESP_LOGE(TAG, "usb set addr failed"); 
-        found->device_addr = 0;
+        ctrl_info->device_addr = 0;
     }
 
     xSemaphoreGive(open_pipes_mutex);
