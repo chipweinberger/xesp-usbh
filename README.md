@@ -2,8 +2,8 @@
 
 See main.c for example usage. 
 
-Library is 80% complete.
-
 Supports Bulk and Control Endpoints.
+
+Functional library, but not completely polished. Created while waiting for the official libraries from Espressif.
 
 
